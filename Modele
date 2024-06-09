@@ -1,0 +1,285 @@
+# <h1><center>**TIPE: Poisson modelisation of goals scored Home/Away**</center></h1>
+
+<h4>
+<hr style=" border:none; height:3px;">
+<center>Salah LAMSAOUB & Université de Paris-Saclay</center>
+<hr style=" border:none; height:3px;">
+</h4>
+
+import pandas as pd
+import numpy as np
+from scipy import stats
+import plotly.express as px
+#rng = np.random.default_rng()
+#stats.kstest(stats.uniform.rvs(size=100, random_state=rng),
+             #stats.norm.cdf)
+pd.options.display.max_columns = None
+pd.options.display.max_rows = None
+
+gamesDf = pd.read_csv( "/content/games.csv" )
+
+#clubsDf = pd.read_csv( "/content/clubs.csv" )
+
+gamesDf.head()
+
+Bundesliga : L1
+Ligue 1 ubereats : FR1
+Premier Ligue : GB1
+
+
+
+# <h2>I) Preprocessing </h2>
+
+def filter_matchs( team, home_away = 'home_club_name' ):
+
+  filtre = ( gamesDf[home_away] == team )
+  filtered_df = gamesDf[ filtre ]
+
+  return filtered_df.sort_values('date')
+
+psg = filter_matchs( 'Paris Saint-Germain Football Club')
+
+from collections import defaultdict
+def get_region(team ):
+  filtre = ( gamesDf['away_club_name'] == team )
+  df = gamesDf[ filtre ]
+  dico = defaultdict(lambda:[])
+  for n in [ -50, -df.shape[0] ]:
+    l = df['home_club_goals'][n:].mean()
+    sigma = l**0.5
+    region = '+/_ ' + '%.2f' % ( 1.96 * sigma/ (-2*n)**0.5 )
+    dico['Équipe'].append( team + ' Away' )
+    dico['lambda'].append( l )
+    dico['Nb de matchs'].append( -2*n )
+    dico['Écart type'].append( sigma )
+    dico['Région de confiance'].append( region )
+
+  return pd.DataFrame(dico)
+
+les = []
+for team in [ 'Paris Saint-Germain Football Club', 'Olympique Lyonnais', 'Olympique de Marseille' ]:
+  les.append( get_region(team ) )
+
+x = pd.concat(les)
+x.groupby(by = ['Équipe', 'Nb de matchs'])
+
+x
+
+df = gamesDf[ gamesDf['competition_id'] == 'FR1' ]
+set( df.home_club_name )
+
+team = 'Paris Saint-Germain Football Club'
+ligue = 'FR1'
+saisons = [2012, 2013, 2014, 2015, 2016, 2017, 2018, 2019, 2020, 2021, 2022, 2023]
+
+psg_games_df = filter_matchs( team, ligue, saisons, home_away = 'home_club_name' )
+
+from scipy.stats import kstest, poisson
+import plotly.graph_objects as go
+
+def perform_ks_test(df):
+    # Step 1: Calculate the parameter for the Poisson distribution (lambda = mean of home_club_goals)
+    lambda_ = df['home_club_goals'].mean()
+    # Step 2: Perform the Kolmogorov-Smirnov test
+    # Generating a Poisson distribution based on the calculated lambda
+    # Comparing it to the observed data
+    ks_statistic, p_value = kstest(df['home_club_goals'], 'poisson', args=(lambda_,))
+
+    # Step 3: Plotting the distribution of home_club_goals and the fitted Poisson distribution
+    # Create a histogram of the data
+    data_hist = go.Histogram(x=df['home_club_goals'], nbinsx=30, opacity=0.75, name='Data', histnorm = 'probability' )
+
+    # Create a scatter plot for the Poisson distribution
+    x_vals = np.arange(0, df['home_club_goals'].max()+1)
+    poisson_probs = poisson.pmf(x_vals, lambda_)
+    fitted_dist = go.Scatter(x=x_vals, y=poisson_probs, name='Poisson Fit', marker=dict(color='red'))
+
+    # Combine plots
+    fig = go.Figure(data=[data_hist, fitted_dist])
+    fig.update_layout(title="Home Club Goals and Fitted Poisson Distribution",
+                      xaxis_title="Goals",
+                      yaxis_title="Probability")
+    fig.show()
+
+    return ks_statistic, p_value
+
+
+perform_ks_test( psg_games_df )
+
+def compare_possion_home_away( league, team, seasons ):
+  filtre_1 = ( gamesDf['competition_id'] == ligue ) & ( gamesDf['season'].isin( seasons ) )
+  filter_home = ( gamesDf['home_club_name'] == team )
+  filter_away = ( gamesDf['away_club_name'] == team  )
+  df_home = gamesDf[ filtre_1 & filter_home ]
+  df_away = gamesDf[ filtre_1 & filter_away ]
+
+  home_goals = df_home['home_club_goals'][:-10]
+  away_goals = df_away['home_club_goals'][:-10]
+
+  lambda_home = home_goals.mean()
+  lambda_away = away_goals.mean()
+
+  # KS TEST HOME
+  ks_statistic, p_value = kstest(home_goals, 'poisson', args=(lambda_home,))
+  print( team + ' KOLMOGOROV TEST HOME GOALS KS STATISTIC : ', ks_statistic )
+  print( team + ' KOLMOGOROV TEST HOME GOALS P-Value : ', p_value )
+
+  # KS TEST AWAY
+  ks_statistic, p_value = kstest(away_goals, 'poisson', args=(lambda_away,))
+  print( 'KOLMOGOROV TEST AWAY GOALS KS STATISTIC : ', ks_statistic )
+  print( 'KOLMOGOROV TEST AWAY GOALS P-Value : ', p_value )
+
+
+  data_hist_home = go.Histogram(x=home_goals, nbinsx=30, opacity=0.75, name='Data Home', histnorm = 'probability' )
+  data_hist_away = go.Histogram(x=away_goals, nbinsx=30, opacity=0.75, name='Data Away', histnorm = 'probability' )
+
+  # Create a scatter plot for the Poisson distribution
+  x_vals = np.arange(0, df['home_club_goals'].max()+1)
+  poisson_probs_home = poisson.pmf(x_vals, lambda_home)
+  poisson_probs_away = poisson.pmf(x_vals, lambda_away)
+
+  fitted_home = go.Scatter(x=x_vals, y=poisson_probs_home, name='Poisson Fit Home')
+  fitted_away = go.Scatter(x=x_vals, y=poisson_probs_away, name='Poisson Fit Away')
+
+  # Combine plots
+  fig = go.Figure(data=[data_hist_home, fitted_home, data_hist_away, fitted_away])
+  fig.update_layout(title=f"{team} Home Club Goals and Fitted Poisson Distribution",
+                    xaxis_title="Goals",
+                    yaxis_title="Probability")
+  fig.show()
+
+  return
+
+
+'AC Ajaccio',
+ 'AJ Auxerre',
+ 'AS Nancy-Lorraine',
+ 'AS Saint-Étienne',
+ 'Amiens SC',
+ 'Angers SCO',
+ 'Association sportive de Monaco Football Club',
+ 'Clermont Foot 63',
+ 'Dijon FCO',
+ 'EA Guingamp',
+ 'ESTAC Troyes',
+ 'FC Girondins Bordeaux',
+ 'FC Sochaux-Montbéliard',
+ 'Football Club Lorient-Bretagne Sud',
+ 'Football Club de Metz',
+ 'Football Club de Nantes',
+ 'GFC Ajaccio',
+ 'Le Havre Athletic Club',
+ 'Lille Olympique Sporting Club Lille Métropole',
+ 'Montpellier Hérault Sport Club',
+ 'Nîmes Olympique',
+ "Olympique Gymnaste Club Nice Côte d'Azur",
+ 'Olympique Lyonnais',
+ 'Olympique de Marseille',
+ 'Paris Saint-Germain Football Club',
+ 'Racing Club de Lens',
+ 'Racing Club de Strasbourg Alsace',
+ 'SC Bastia',
+ 'SM Caen',
+ 'Stade Rennais Football Club',
+ 'Stade brestois 29',
+ 'Stade de Reims',
+ 'Thonon Évian Grand Genève FC',
+ 'Toulouse Football Club',
+ 'Valenciennes FC'}
+
+team = 'Toulouse Football Club'
+ligue = 'FR1'
+saisons = [2012, 2013, 2014, 2015, 2016, 2017, 2018, 2019, 2020, 2021, 2022, 2023]
+compare_possion_home_away( ligue, team, saisons )
+compare_possion_home_away( ligue, 'Paris Saint-Germain Football Club', saisons )
+compare_possion_home_away( ligue, 'Olympique de Marseille', saisons )
+
+
+
+
+
+
+def rank_pvalue(ligue, saisons):
+  filtre_1 = ( gamesDf['competition_id'] == ligue ) & ( gamesDf['season'].isin( saisons ) )
+  teams = list(set(gamesDf[filtre_1].away_club_name))
+
+  results = {"Equipe Home/Away" : [], "Lambda" : [], "KS statistique": [], "P-value": [], "Nb de matchs": [] }
+
+
+  for team in teams:
+    filter_2 = ( gamesDf['home_club_name'] == team )
+    df = gamesDf[ filtre_1 & filter_2 ]
+
+    home_goals = df['home_club_goals'][:-10]
+    lambda_home = home_goals.mean()
+    results["Equipe Home/Away"] += [team + " Home"]
+    ks_statistic, p_value = kstest(home_goals, 'poisson', args=(lambda_home,))
+    results["Lambda"] += [lambda_home]
+    results["KS statistique"] += [ks_statistic]
+    results["P-value"] += [p_value]
+    results["Nb de matchs"] += [len( home_goals )]
+
+    filter_2 = ( gamesDf['away_club_name'] == team  )
+    df = gamesDf[ filtre_1 & filter_2 ]
+
+    away_goals = df['away_club_goals'][:-10]
+    lambda_away = away_goals.mean()
+    results["Equipe Home/Away"] += [team + " Away"]
+    ks_statistic, p_value = kstest(away_goals, 'poisson', args=(lambda_away,))
+    results["Lambda"] += [lambda_home]
+    results["KS statistique"] += [ks_statistic]
+    results["P-value"] += [p_value]
+    results["Nb de matchs"] += [len( away_goals )]
+
+  return pd.DataFrame(results)
+
+ranked_df = rank_pvalue('FR1', saisons)
+
+res = ranked_df.sort_values('P-value')
+
+res['KS statistique'] = res['KS statistique']*0.2
+
+res['P-value'] = [ max( [ _*10**i for i in range(30) if _*10**i < 0.9 ] )  for _ in res['P-value'] ]
+
+res
+
+#Poisson Regression
+
+import statsmodels.api as sm
+import statsmodels.formula.api as smf
+
+
+def getLeague(df, ident):
+  return df[df['competition_id']==ident]
+
+
+lUnUber = getLeague(gamesDf, 'FR1')
+
+prepareHome = lUnUber[ ['home_club_name', 'away_club_name', 'home_club_goals'] ].rename(
+    columns = {'home_club_name': 'Team', 'away_club_name':'Opponent', 'home_club_goals':'Goals'}
+)
+prepareHome['Home'] = 1
+
+prepareAway = lUnUber[ ['away_club_name', 'home_club_name', 'away_club_goals'] ].rename(
+    columns = {'home_club_name': 'Opponent', 'away_club_name':'Team', 'away_club_goals':'Goals'}
+)
+prepareAway['Away'] = 0
+
+preparedData = pd.concat( [prepareHome, prepareAway] )
+
+# @title Titre par défaut
+poisson_model = smf.glm(formula="Goals ~ Home + Team + Opponent", data=preparedData,
+                        family=sm.families.Poisson()).fit()
+poisson_model.summary()
+
+def Match_Table( poissonModel, Home, Away, max_goals=5):
+
+    inputHome = pd.DataFrame( data={'Team': Home, 'Opponent': Away ,'Home':1}, index=[1] )
+    inputAway = pd.DataFrame(data={'Team': Away, 'Opponent': Home,'Home':0}, index=[1])
+    home_goals_avg = poissonModel.predict(inputHome).values[0]
+    away_goals_avg = poissonModel.predict(inputAway).values[0]
+    team_pred = [[poisson.pmf(i, team_avg) for i in range(0, max_goals+1)] for team_avg in [home_goals_avg, away_goals_avg]]
+    return(np.outer(np.array(team_pred[0]), np.array(team_pred[1])))*100
+
+
+Match_Table(poisson_model, 'Toulouse Football Club', 'Paris Saint-Germain Football Club', max_goals = 3)
